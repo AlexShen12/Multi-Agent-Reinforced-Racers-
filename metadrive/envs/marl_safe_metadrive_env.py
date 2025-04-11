@@ -37,6 +37,12 @@ RACING_SAFE_METADRIVE_DEFAULT_CONFIG = dict(
     first_checkpoint_bonus=1.0,  # Additional bonus for being first to reach a checkpoint
     num_checkpoints=5,  # Number of checkpoints to place around the track
 
+    # ===== Finish line settings =====
+    enable_finish_line=True,  # Whether to add a finish line
+    finish_line_at_end=True,  # Place finish line at the end of the last track segment
+    terminate_on_finish=True,  # End episode when finish line is crossed
+    finish_line_width=10.0,  # Width of the finish line for detection
+
     # ===== Safe driving settings =====
     # Override termination conditions to allow continuous simulation
     crash_vehicle_done=False,
@@ -117,11 +123,16 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
         self.agent_positions = {}
         self.race_finished = False
         self.race_winner = None
+        self.previous_winner = None  # Track the winner from the previous race
 
         # Initialize checkpoint tracking
         self.checkpoints = []
         self.agent_checkpoints = {}
         self.checkpoint_first_agent = {}
+
+        # Initialize finish line tracking
+        self.finish_line = None
+        self.finish_line_crossed = {}
 
         # Initialize agent-specific attributes
         self._init_agent_attributes()
@@ -141,6 +152,19 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
 
     def reset(self, *args, **kwargs):
         """Reset the environment and initialize agent tracking."""
+        # Store the previous winner before resetting race state
+        if self.race_finished and self.race_winner:
+            self.previous_winner = self.race_winner
+
+        # Ensure all agents are properly cleaned up before reset
+        # This is important to prevent issues with agents not respawning
+        if hasattr(self, 'engine') and hasattr(self.engine, 'agent_manager'):
+            # Force clear any agents in the dying queue
+            if hasattr(self.engine.agent_manager, '_dying_objects'):
+                for v_name, (v, _) in list(self.engine.agent_manager._dying_objects.items()):
+                    self.engine.agent_manager._remove_vehicle(v)
+                self.engine.agent_manager._dying_objects.clear()
+
         # Reset episode costs and race status
         self._init_agent_attributes()
         self.race_finished = False
@@ -156,6 +180,10 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
         self.agent_checkpoints = {}
         self.checkpoint_first_agent = {}
 
+        # Initialize finish line tracking
+        self.finish_line = None
+        self.finish_line_crossed = {}
+
         # Reset the environment
         obs, info = super(MultiAgentRacingSafeEnv, self).reset(*args, **kwargs)
 
@@ -167,9 +195,14 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
             self.wrong_side_counter[agent_id] = 0
             self.wrong_side_status[agent_id] = False
             self.agent_checkpoints[agent_id] = set()  # Track which checkpoints this agent has passed
+            self.finish_line_crossed[agent_id] = False  # Reset finish line crossing status
 
         # Create checkpoints along the track
         self._create_checkpoints()
+
+        # Create finish line if enabled
+        if self.config["enable_finish_line"]:
+            self._create_finish_line()
 
         return obs, info
 
@@ -196,6 +229,25 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
         # Update agent progress for racing rewards
         self._update_agent_progress()
 
+        # Check for finish line crossing
+        if self.config["enable_finish_line"] and self.finish_line:
+            self._check_finish_line_crossing(info)
+
+            # Check if we need to end the episode after the 3-second buffer
+            if self.config["terminate_on_finish"] and self.race_finished:
+                # Check if 3 seconds have passed since the finish line was crossed
+                if self.finish_line["finish_time"] is not None:
+                    import time
+                    current_time = time.time()
+                    elapsed_time = current_time - self.finish_line["finish_time"]
+
+                    # If 3 seconds have passed, terminate all agents
+                    if elapsed_time >= 3.0:
+                        # Set all agents to terminated
+                        for agent_id in self.agents.keys():
+                            terminated[agent_id] = True
+                        print("3 seconds elapsed after finish line crossing. Ending episode.")
+
         # Apply racing rewards
         rewards = self._apply_racing_rewards(rewards, info)
 
@@ -213,6 +265,8 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
                     "is_leading": self._is_agent_leading(agent_id),
                     "race_finished": self.race_finished,
                     "race_winner": self.race_winner,
+                    "previous_winner": self.previous_winner,
+                    "finish_line_crossed": self.finish_line_crossed.get(agent_id, False),
                     "checkpoints_passed": len(self.agent_checkpoints.get(agent_id, set())),
                     "total_checkpoints": len(self.checkpoints)
                 })
@@ -564,10 +618,293 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
 
         return cost, step_info
 
+    def _create_finish_line(self):
+        """Create a finish line that stretches across the entire ending track segment."""
+        self.finish_line = None
+
+        # Get the map and road network
+        if not hasattr(self.engine, 'current_map') or not self.engine.current_map:
+            return
+
+        # Get the blocks from the map (track segments)
+        if not hasattr(self.engine.current_map, 'blocks') or not self.engine.current_map.blocks:
+            return
+
+        # Get the road network from the map
+        road_network = self.engine.current_map.road_network
+        if not road_network or not hasattr(road_network, 'graph'):
+            return
+
+        # Look for a specific ending block type if possible
+        ending_block = None
+
+        # Try to find a block that represents the end of the track
+        # In some maps, there might be specific ending blocks
+        for block in self.engine.current_map.blocks:
+            # Check if this is a designated end block by its type or properties
+            if hasattr(block, 'SOCKET_OUT') and not block.SOCKET_OUT:
+                # This block has no output socket, so it's likely an ending block
+                ending_block = block
+                break
+            elif hasattr(block, 'type') and 'end' in str(block.type).lower():
+                # Block type contains 'end', suggesting it's an ending block
+                ending_block = block
+                break
+            elif hasattr(block, 'id') and 'end' in str(block.id).lower():
+                # Block ID contains 'end', suggesting it's an ending block
+                ending_block = block
+                break
+
+        # If we couldn't find a specific ending block, use the last block by ID
+        if not ending_block:
+            max_block_id = -1
+            for block in self.engine.current_map.blocks:
+                if hasattr(block, 'id'):
+                    # Try to convert ID to int for comparison if it's a string
+                    try:
+                        block_id = int(block.id) if isinstance(block.id, str) else block.id
+                        if block_id > max_block_id:
+                            max_block_id = block_id
+                            ending_block = block
+                    except (ValueError, TypeError):
+                        # If conversion fails, continue to the next block
+                        pass
+
+        # If we still don't have an ending block, use the last block in the list
+        if not ending_block and len(self.engine.current_map.blocks) > 0:
+            ending_block = self.engine.current_map.blocks[-1]
+
+        if not ending_block:
+            print("Could not find an ending block for the finish line")
+            return
+
+        print(f"Found ending block: {ending_block.id if hasattr(ending_block, 'id') else 'Unknown ID'}")
+
+        # Get all lanes in the ending block
+        block_lanes = []
+
+        # Try different methods to get the lanes
+        if hasattr(ending_block, 'get_lanes'):
+            block_lanes = ending_block.get_lanes()
+        elif hasattr(ending_block, 'get_out_lanes'):
+            block_lanes = ending_block.get_out_lanes()
+
+        # If we couldn't get lanes directly from the block, try the road network
+        if not block_lanes:
+            # Try to find lanes connected to the ending block
+            if hasattr(ending_block, 'end_node'):
+                for from_node, to_nodes in road_network.graph.items():
+                    if from_node == ending_block.end_node:
+                        for _, lanes in to_nodes.items():
+                            block_lanes.extend(lanes)
+
+            # If still no lanes, try the start node
+            if not block_lanes and hasattr(ending_block, 'start_node'):
+                for from_node, to_nodes in road_network.graph.items():
+                    if from_node == ending_block.start_node:
+                        for _, lanes in to_nodes.items():
+                            block_lanes.extend(lanes)
+
+        # If we still don't have lanes, try to get all lanes in the road network
+        if not block_lanes:
+            for _, to_nodes in road_network.graph.items():
+                for _, lanes in to_nodes.items():
+                    block_lanes.extend(lanes)
+
+        if not block_lanes:
+            print("Could not find any lanes for the finish line")
+            return
+
+        # Get the width of the entire track at the finish line position
+        # by finding the leftmost and rightmost points of all lanes
+        lane_position = 0.99  # 99% along the lane length - very end of the lane
+
+        # Calculate the average position and heading across all lanes
+        avg_pos_x = 0
+        avg_pos_y = 0
+        avg_heading = 0
+        valid_lanes = 0
+
+        # Store lane positions for later use
+        lane_positions = []
+
+        for lane in block_lanes:
+            try:
+                # Get position at the very end of the lane
+                pos = lane.position(lane.length * lane_position, 0)
+                heading = lane.heading_theta_at(lane.length * lane_position)
+
+                # Store this position
+                lane_positions.append((pos, heading))
+
+                avg_pos_x += pos[0]
+                avg_pos_y += pos[1]
+                avg_heading += heading
+                valid_lanes += 1
+            except Exception as e:
+                print(f"Error getting lane position: {e}")
+
+        if valid_lanes == 0:
+            print("No valid lanes found for finish line")
+            return
+
+        # Calculate average position and heading
+        avg_pos_x /= valid_lanes
+        avg_pos_y /= valid_lanes
+        avg_heading /= valid_lanes
+
+        # Calculate the width of the track by finding the maximum distance
+        # between any two lanes at the finish line position
+        max_width = 0
+        for i in range(len(lane_positions)):
+            for j in range(i+1, len(lane_positions)):
+                try:
+                    pos_i = lane_positions[i][0]  # Get the stored position
+                    pos_j = lane_positions[j][0]  # Get the stored position
+                    dist = math.sqrt((pos_i[0] - pos_j[0])**2 + (pos_i[1] - pos_j[1])**2)
+                    max_width = max(max_width, dist)
+                except Exception:
+                    pass
+
+        # Ensure minimum width for the finish line
+        # Make the finish line wider in the track width direction
+        # But not so wide that it crosses to the wrong side of the road
+        track_width = max(max_width + 15.0, 40.0)  # Add more margin and ensure wider minimum width
+
+        # Create the finish line at the end of the track
+        self.finish_line = {
+            "position": (avg_pos_x, avg_pos_y),
+            "width": track_width,
+            "heading": avg_heading,  # Original road direction
+            "lanes": block_lanes,
+            "lane_position": lane_position,
+            "finish_time": None,  # Will store the time when first agent crosses the line
+            "visible": False  # Don't show the finish line visually
+        }
+
+        # Visualize the finish line if rendering is enabled
+        if self.config["use_render"]:
+            self._visualize_finish_line()
+
+        print(f"Created finish line across the entire track at the ending segment")
+
+    def _visualize_finish_line(self):
+        """Add a visual representation of the finish line that stretches across the entire track."""
+        if not self.finish_line or not hasattr(self.engine, 'render_pipeline'):
+            return
+
+        # Check if the finish line should be visible
+        if not self.finish_line.get("visible", True):
+            # Don't visualize the finish line
+            return
+
+        # The finish line is invisible, so we don't need to do anything
+        # This method is kept for compatibility with the existing code
+
+    def _check_finish_line_crossing(self, info):
+        """Check if any agent has crossed the finish line."""
+        if not self.finish_line:
+            return
+
+        finish_pos = self.finish_line["position"]
+        finish_heading = self.finish_line["heading"]
+        finish_width = self.finish_line["width"]
+
+        # Calculate perpendicular direction to the finish line
+        perp_x = math.sin(finish_heading)
+        perp_y = -math.cos(finish_heading)
+
+        # Calculate the finish line endpoints
+        half_width = finish_width / 2
+        start_x = finish_pos[0] - perp_x * half_width
+        start_y = finish_pos[1] - perp_y * half_width
+        end_x = finish_pos[0] + perp_x * half_width
+        end_y = finish_pos[1] + perp_y * half_width
+
+        # Calculate the direction along the finish line
+        line_dir_x = end_x - start_x
+        line_dir_y = end_y - start_y
+        line_length = math.sqrt(line_dir_x**2 + line_dir_y**2)
+
+        # Normalize the direction vector
+        if line_length > 0:
+            line_dir_x /= line_length
+            line_dir_y /= line_length
+
+        # Calculate the normal to the finish line (direction to check for crossing)
+        normal_x = -line_dir_y
+        normal_y = line_dir_x
+
+        # Store previous positions to detect crossing
+        if not hasattr(self, 'previous_positions'):
+            self.previous_positions = {agent_id: agent.position for agent_id, agent in self.agents.items()}
+
+        for agent_id, agent in self.agents.items():
+            # Skip if already crossed
+            if self.finish_line_crossed.get(agent_id, False):
+                continue
+
+            # Get current and previous agent positions
+            current_pos = agent.position
+            previous_pos = self.previous_positions.get(agent_id, current_pos)
+
+            # Update previous position for next check
+            self.previous_positions[agent_id] = current_pos
+
+            # Check if the agent is close enough to the finish line
+            # First, calculate the projection of the agent position onto the finish line
+            agent_to_start_x = current_pos[0] - start_x
+            agent_to_start_y = current_pos[1] - start_y
+
+            # Project onto the line direction
+            proj = agent_to_start_x * line_dir_x + agent_to_start_y * line_dir_y
+
+            # Check if the projection is within the line segment
+            if 0 <= proj <= line_length:
+                # Calculate the perpendicular distance to the line
+                perp_dist = abs(agent_to_start_x * normal_x + agent_to_start_y * normal_y)
+
+                # Check if the agent is close enough to the line
+                # Widen the detection threshold but ensure it doesn't cross to the wrong side
+                # The typical lane width is around 3.5-4.0 units, so we'll use 5.0 as threshold
+                # This is wide enough to detect the vehicle but not so wide it crosses lanes
+                if perp_dist <= 5.0:  # Wider detection threshold
+                    # Check if the agent crossed the line by checking the sign of the dot product
+                    # of the movement vector and the line normal
+                    movement_x = current_pos[0] - previous_pos[0]
+                    movement_y = current_pos[1] - previous_pos[1]
+
+                    # Skip if the agent hasn't moved
+                    if movement_x == 0 and movement_y == 0:
+                        continue
+
+                    # Calculate dot product with the normal
+                    dot_product = movement_x * normal_x + movement_y * normal_y
+
+                    # If dot product is positive, the agent crossed the line in the correct direction
+                    if dot_product > 0:
+                        self.finish_line_crossed[agent_id] = True
+
+                        # Mark race as finished and set winner
+                        if not self.race_finished:
+                            self.race_finished = True
+                            self.race_winner = agent_id
+
+                            # Record the finish time
+                            import time
+                            self.finish_line["finish_time"] = time.time()
+
+                            # Add winning reward
+                            if agent_id in info:
+                                info[agent_id]["finish_line_crossed"] = True
+
+                            print(f"Agent {agent_id} has crossed the finish line and won the race!")
+                            print(f"Episode will end in 3 seconds...")
+
     def done_function(self, vehicle_id):
         """
         Override the done function to allow continuous simulation.
-        Only terminate when reaching the destination or max steps.
+        Only terminate when reaching the destination, crossing the finish line, or max steps.
         """
         # Get the vehicle
         vehicle = self.vehicles[vehicle_id]
@@ -578,6 +915,7 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
             "crash_object": False,
             "out_of_road": False,
             "arrive_dest": False,
+            "finish_line": False,
             "max_step": False
         }
 
@@ -597,12 +935,20 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
         if hasattr(vehicle, 'arrive_destination') and vehicle.arrive_destination:
             done_info["arrive_dest"] = True
 
+        # Check if this agent has crossed the finish line
+        if self.config["enable_finish_line"] and vehicle_id in self.finish_line_crossed and self.finish_line_crossed[vehicle_id]:
+            done_info["finish_line"] = True
+
         # Check for max steps
         if self.episode_step >= self.config["horizon"]:
             done_info["max_step"] = True
 
-        # Only terminate for max steps or arrival at destination
+        # Terminate for max steps, arrival at destination, or finish line crossing
         done = done_info["max_step"] or done_info["arrive_dest"]
+
+        # Add finish line termination if enabled
+        if self.config["enable_finish_line"] and self.config["terminate_on_finish"]:
+            done = done or done_info["finish_line"]
 
         return done, done_info
 
