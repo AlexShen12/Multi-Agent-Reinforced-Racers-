@@ -25,9 +25,13 @@ Please feel free to run this script to enjoy a racing experience! Remember to pr
 import argparse
 import time  # Added for tracking finish times and reset delay
 import math  # Added for trigonometric functions
+import os
 
 from metadrive.constants import HELP_MESSAGE
 from metadrive.envs.marl_safe_metadrive_env import MultiAgentRacingSafeEnv
+
+# Import our SB3 PPO policy
+from metadrive.examples.sb3_ppo_policy import MultiAgentPPOTrainer
 
 
 # Function to save agent model weights
@@ -112,14 +116,11 @@ def remove_agent_from_simulation(env, agent_id):
     print(f"Removed agent {agent_id} from active simulation")
     return True
 
-# Custom function to check if an agent has crossed the finish line
-def custom_check_finish_line_crossing(env, info):
+# Custom function to check if an agent has reached its destination
+def custom_check_destination_arrival(env, info):
     """
-    A robust implementation of finish line crossing detection that combines two approaches:
-    1. Lane-based detection: Checks if the agent is near the end of the final lane
-    2. Geometric detection: Checks if the agent has crossed the finish line plane
-
-    This dual approach ensures reliable detection regardless of track configuration.
+    Uses the built-in _is_arrive_destination method to check if agents have reached their destinations.
+    This leverages the existing navigation system instead of using a custom finish line.
 
     Args:
         env: The environment object
@@ -128,151 +129,26 @@ def custom_check_finish_line_crossing(env, info):
     Returns:
         None
     """
-    if not env.finish_line:
-        return
+    # Safety check: ensure finish_line_crossed attribute exists
+    if not hasattr(env, 'finish_line_crossed'):
+        env.finish_line_crossed = {}
 
-    # Get finish line properties
-    finish_pos = env.finish_line["position"]
-    finish_heading = env.finish_line["heading"]
-    finish_width = env.finish_line["width"]
-    detection_buffer = env.finish_line.get("detection_buffer", 5.0)
+    # Initialize race_finished and race_winner attributes if they don't exist
+    if not hasattr(env, 'race_finished'):
+        env.race_finished = False
 
-    # Get the final lane if available
-    final_lane = env.finish_line.get("final_lane", None)
+    if not hasattr(env, 'race_winner'):
+        env.race_winner = None
 
-    # Check each agent for finish line crossing
+    # Check each agent for destination arrival
     for agent_id, agent in env.agents.items():
         # Skip if already crossed
         if env.finish_line_crossed.get(agent_id, False):
             continue
 
-        # Initialize crossing detection flags
-        lane_based_detection = False
-        geometric_detection = False
-
-        # Method 1: Lane-based detection (if final lane is available)
-        if final_lane is not None:
-            try:
-                # Calculate the local coordinates of the agent on the final lane
-                long, lat = final_lane.local_coordinates(agent.position)
-
-                # Check if the agent is near the end of the final lane
-                # The condition is similar to MetaDriveEnv._is_arrive_destination but with a larger buffer
-                # For curved segments, we need an even larger buffer
-                is_circular_lane = "CircularLane" in str(type(final_lane).__name__)
-
-                if is_circular_lane:
-                    # For circular lanes, use a larger buffer and check if we're past a certain threshold
-                    # This is because the end of a circular lane can be tricky to detect precisely
-                    buffer = 20  # Larger buffer for circular lanes
-                    threshold = 0.85  # 85% of the lane length
-                    is_at_end = (long > threshold * final_lane.length) or (final_lane.length - buffer < long < final_lane.length + buffer)
-                    print(f"Circular lane detection: long={long}, threshold={threshold * final_lane.length}, length={final_lane.length}")
-                else:
-                    # For straight lanes, use a standard buffer
-                    buffer = 10
-                    is_at_end = (final_lane.length - buffer < long < final_lane.length + buffer)
-
-                # Check if the agent is within the lane width (with some buffer)
-                lane_width = final_lane.width if hasattr(final_lane, 'width') else 3.5
-                # For circular lanes, use an even wider detection area
-                width_multiplier = 2.0 if is_circular_lane else 1.5
-                is_within_width = (lane_width * width_multiplier >= abs(lat))
-
-                # If both conditions are met, the agent has crossed the finish line
-                lane_based_detection = is_at_end and is_within_width
-
-                # Store detection details for debugging
-                long_pos = long
-                lat_pos = lat
-                lane_type = type(final_lane).__name__
-
-                # Print detailed detection information
-                print(f"Lane-based detection for agent {agent_id}: ")
-                print(f"  Lane type: {lane_type}")
-                print(f"  Lane length: {final_lane.length}")
-                print(f"  Agent position: long={long}, lat={lat}")
-                print(f"  Is at end: {is_at_end} (threshold: {final_lane.length - buffer} to {final_lane.length + buffer})")
-                print(f"  Is within width: {is_within_width} (max width: {lane_width * width_multiplier})")
-                print(f"  Detection result: {lane_based_detection}")
-            except Exception as e:
-                print(f"Lane-based detection error for agent {agent_id}: {e}")
-
-        # Method 2: Geometric detection (always used as a backup)
-        try:
-            # Calculate perpendicular direction to the finish line
-            perp_x = math.sin(finish_heading)
-            perp_y = -math.cos(finish_heading)
-
-            # Calculate the finish line endpoints
-            half_width = finish_width / 2
-            start_x = finish_pos[0] - perp_x * half_width
-            start_y = finish_pos[1] - perp_y * half_width
-            end_x = finish_pos[0] + perp_x * half_width
-            end_y = finish_pos[1] + perp_y * half_width
-
-            # Calculate the direction along the finish line
-            line_dir_x = end_x - start_x
-            line_dir_y = end_y - start_y
-            line_length = math.sqrt(line_dir_x**2 + line_dir_y**2)
-
-            # Normalize the direction vector
-            if line_length > 0:
-                line_dir_x /= line_length
-                line_dir_y /= line_length
-
-            # Calculate the normal to the finish line (direction to check for crossing)
-            normal_x = -line_dir_y
-            normal_y = line_dir_x
-
-            # Initialize previous positions if not already done
-            if not hasattr(env, 'previous_positions'):
-                env.previous_positions = {agent_id: agent.position for agent_id, agent in env.agents.items()}
-
-            # Get current and previous agent positions
-            current_pos = agent.position
-            previous_pos = env.previous_positions.get(agent_id, current_pos)
-
-            # Update previous position for next check
-            env.previous_positions[agent_id] = current_pos
-
-            # Calculate the distance from the agent to the finish line
-            # First, calculate the vector from the start point to the agent
-            agent_to_start_x = current_pos[0] - start_x
-            agent_to_start_y = current_pos[1] - start_y
-
-            # Project this vector onto the finish line direction to get the position along the line
-            proj = agent_to_start_x * line_dir_x + agent_to_start_y * line_dir_y
-
-            # Check if the projection is within the line segment (with some buffer)
-            if -detection_buffer <= proj <= line_length + detection_buffer:
-                # Calculate the perpendicular distance to the line
-                perp_dist = abs(agent_to_start_x * normal_x + agent_to_start_y * normal_y)
-
-                # Check if the agent is close enough to the line
-                if perp_dist <= detection_buffer:
-                    # Calculate the movement vector
-                    movement_x = current_pos[0] - previous_pos[0]
-                    movement_y = current_pos[1] - previous_pos[1]
-
-                    # Skip if the agent hasn't moved significantly
-                    if abs(movement_x) < 0.01 and abs(movement_y) < 0.01:
-                        continue
-
-                    # Calculate dot product with the normal to check crossing direction
-                    dot_product = movement_x * normal_x + movement_y * normal_y
-
-                    # If dot product is positive, the agent crossed the line in the correct direction
-                    geometric_detection = (dot_product > 0)
-        except Exception as e:
-            print(f"Geometric detection error for agent {agent_id}: {e}")
-
-        # If either detection method indicates a crossing, consider it valid
-        if lane_based_detection or geometric_detection:
-            # Store the crossing position
-            env.finish_line["crossed_positions"][agent_id] = agent.position
-
-            # Mark as crossed
+        # Use the built-in _is_arrive_destination method
+        if env._is_arrive_destination(agent):
+            # Mark this agent as having crossed the finish line
             env.finish_line_crossed[agent_id] = True
 
             # Mark race as finished and set winner if this is the first agent
@@ -282,7 +158,7 @@ def custom_check_finish_line_crossing(env, info):
 
                 # Record the finish time
                 import time
-                env.finish_line["finish_time"] = time.time()
+                env.finish_time = time.time()
 
                 # Add winning reward
                 if agent_id in info:
@@ -291,29 +167,20 @@ def custom_check_finish_line_crossing(env, info):
                     if "reward" in info[agent_id]:
                         info[agent_id]["reward"] += env.config.get("winning_reward", 10.0)
 
-                # Print detailed crossing information
-                print(f"Agent {agent_id} has crossed the finish line and won the race!")
-                if lane_based_detection and final_lane is not None:
-                    print(f"Lane-based detection: Longitudinal position: {long_pos}, Lateral position: {lat_pos}")
-                    print(f"Final lane length: {final_lane.length}")
-                if geometric_detection:
-                    print(f"Geometric detection: Agent crossed the finish line plane")
-                print(f"Crossing position: {agent.position}")
+                print(f"Agent {agent_id} has reached the destination and won the race!")
+                print(f"Episode will end in 3 seconds...")
             else:
                 # Add finish info for non-winners
                 if agent_id in info:
                     info[agent_id]["finish_line_crossed"] = True
 
-                # Print detailed crossing information
-                print(f"Agent {agent_id} has crossed the finish line (position: {len(env.finish_line_crossed)})")
-                if lane_based_detection and final_lane is not None:
-                    print(f"Lane-based detection: Longitudinal position: {long_pos}, Lateral position: {lat_pos}")
-                if geometric_detection:
-                    print(f"Geometric detection: Agent crossed the finish line plane")
+                print(f"Agent {agent_id} has reached the destination (position: {len(env.finish_line_crossed)})")
 
             # Check if all agents have crossed
             if len(env.finish_line_crossed) >= len(env.agents):
-                print(f"All agents have crossed the finish line!")
+                print(f"All agents have reached their destinations!")
+
+
 
 # Function to create a proper finish line at the very end of the track
 def fix_finish_line_placement(env):
@@ -513,7 +380,9 @@ def fix_finish_line_placement(env):
 
                     # Calculate position with error handling
                     try:
-                        pos = lane.position(lane_position * lane.length)
+                        # All lane types in MetaDrive require a lateral parameter
+                        # Use lateral=0 for center of lane
+                        pos = lane.position(lane_position * lane.length, 0)
                         heading = lane.heading_theta_at(lane_position * lane.length)
 
                         print(f"Lane position calculated at {lane_position * 100}% of length: {pos}")
@@ -536,7 +405,10 @@ def fix_finish_line_placement(env):
                         fallback_position = 0.9  # 90% along the lane length
                         try:
                             print(f"Trying fallback position at {fallback_position * 100}% of length")
-                            pos = lane.position(fallback_position * lane.length)
+
+                            # All lane types in MetaDrive require a lateral parameter
+                            # Use lateral=0 for center of lane
+                            pos = lane.position(fallback_position * lane.length, 0)
                             heading = lane.heading_theta_at(fallback_position * lane.length)
 
                             avg_pos_x += pos[0]
@@ -554,8 +426,64 @@ def fix_finish_line_placement(env):
                     print(f"Error accessing lane position method: {e}")
 
         if valid_lanes == 0:
-            print("Could not calculate finish line position from lanes")
-            return False
+            print("Could not calculate finish line position from lanes, using fallback method")
+            # Fallback method: Create a simple finish line at a fixed position
+            # Get the last block in the track
+            last_block = blocks[-1]
+
+            # Get the socket position (end of the block)
+            if hasattr(last_block, 'get_socket') and callable(last_block.get_socket):
+                try:
+                    socket = last_block.get_socket(0)
+                    if socket and hasattr(socket, 'position'):
+                        # Use the socket position as the finish line position
+                        socket_pos = socket.position
+                        print(f"Using socket position as finish line position: {socket_pos}")
+
+                        # Create a simple finish line
+                        env.finish_line = {
+                            "position": (socket_pos[0], socket_pos[1]),
+                            "width": 40.0,  # Wide enough to cover the track
+                            "heading": 0.0,  # Default heading
+                            "finish_time": None,
+                            "visible": False,  # Don't show the finish line
+                            "detection_buffer": 10.0,  # Larger buffer for detection
+                            "final_lane": None,  # No specific lane
+                            "crossed_positions": {}
+                        }
+
+                        # Override the environment's finish line crossing detection method
+                        env._original_check_finish_line_crossing = env._check_finish_line_crossing
+                        env._check_finish_line_crossing = lambda info: custom_check_destination_arrival(env, info)
+
+                        # Create a visual representation of the finish line
+                        create_finish_line_visualization(env)
+
+                        return True
+                except Exception as e:
+                    print(f"Error using socket position: {e}")
+
+            # If socket approach fails, create a finish line at a fixed distance from the start
+            print("Creating a default finish line at a fixed position")
+            env.finish_line = {
+                "position": (500.0, 0.0),  # Fixed position far from start
+                "width": 100.0,  # Very wide to ensure detection
+                "heading": 0.0,  # Default heading
+                "finish_time": None,
+                "visible": False,  # Don't show the finish line
+                "detection_buffer": 20.0,  # Very large buffer for detection
+                "final_lane": None,  # No specific lane
+                "crossed_positions": {}
+            }
+
+            # Override the environment's finish line crossing detection method
+            env._original_check_finish_line_crossing = env._check_finish_line_crossing
+            env._check_finish_line_crossing = lambda info: custom_check_destination_arrival(env, info)
+
+            # Create a visual representation of the finish line
+            create_finish_line_visualization(env)
+
+            return True
 
         # Calculate the average position and heading
         avg_pos_x /= valid_lanes
@@ -573,7 +501,9 @@ def fix_finish_line_placement(env):
             if hasattr(lane, 'position') and callable(lane.position):
                 try:
                     # Get the left and right boundaries at the specified point
-                    pos = lane.position(lane_position * lane.length)
+                    # All lane types in MetaDrive require a lateral parameter
+                    # Use lateral=0 for center of lane
+                    pos = lane.position(lane_position * lane.length, 0)
                     heading = lane.heading_theta_at(lane_position * lane.length)
                     width = lane.width if hasattr(lane, 'width') else 3.5  # Default lane width
 
@@ -602,7 +532,7 @@ def fix_finish_line_placement(env):
 
         # Ensure minimum width for the finish line
         # Make the finish line wider than the track width to ensure detection
-        finish_line_width = max(track_width * 1.5, 40.0)  # At least 40 units wide
+        finish_line_width = max(track_width * 1.2, 40.0)  # At least 40 units wide
 
         # Calculate the perpendicular heading (90 degrees to the road direction)
         perpendicular_heading = avg_heading + math.pi/2
@@ -613,7 +543,7 @@ def fix_finish_line_placement(env):
             "width": finish_line_width,
             "heading": perpendicular_heading,
             "finish_time": None,
-            "visible": True,
+            "visible": False,  # Don't show the finish line
             "detection_buffer": 5.0,  # Buffer for detection
             "final_lane": final_lane,  # Store reference to the final lane for crossing detection
             "crossed_positions": {}
@@ -626,7 +556,7 @@ def fix_finish_line_placement(env):
 
         # Override the environment's finish line crossing detection method with our custom implementation
         env._original_check_finish_line_crossing = env._check_finish_line_crossing
-        env._check_finish_line_crossing = lambda info: custom_check_finish_line_crossing(env, info)
+        env._check_finish_line_crossing = lambda info: custom_check_destination_arrival(env, info)
 
         # Create a visual representation of the finish line
         create_finish_line_visualization(env)
@@ -639,7 +569,8 @@ def fix_finish_line_placement(env):
 # Function to create a visual representation of the finish line
 def create_finish_line_visualization(env):
     """
-    Create a visual representation of the finish line that is clearly visible to the user.
+    This function is intentionally disabled to remove visual finish lines.
+    We're now using the built-in destination arrival detection instead of custom finish lines.
 
     Args:
         env: The environment object
@@ -647,101 +578,17 @@ def create_finish_line_visualization(env):
     Returns:
         None
     """
-    if not env.finish_line or not hasattr(env.engine, 'render'):
-        print("Cannot create finish line visualization - missing required components")
-        return
+    # Remove any existing finish line visualization
+    if hasattr(env, 'engine') and hasattr(env.engine, 'render') and hasattr(env.engine.render, 'find'):
+        existing_finish_line = env.engine.render.find("**/finish_line*")
+        if existing_finish_line:
+            existing_finish_line.removeNode()
+            print("Removed existing finish line visualization")
 
-    # Always make the finish line visible
-    env.finish_line["visible"] = True
-
-    try:
-        # Remove any existing finish line visualization
-        if hasattr(env.engine.render, 'find'):
-            existing_finish_line = env.engine.render.find("**/finish_line*")
-            if existing_finish_line:
-                existing_finish_line.removeNode()
-
-        # Get finish line properties
-        pos = env.finish_line["position"]
-        heading = env.finish_line["heading"]
-        width = env.finish_line["width"]
-
-        # Create a visual marker for the finish line
-        from panda3d.core import NodePath, LineSegs
-
-        # Calculate perpendicular direction to create a line across the road
-        perp_x = math.sin(heading)
-        perp_y = -math.cos(heading)
-
-        # Create the finish line
-        half_width = width / 2
-        start_x = pos[0] - perp_x * half_width
-        start_y = pos[1] - perp_y * half_width
-        end_x = pos[0] + perp_x * half_width
-        end_y = pos[1] + perp_y * half_width
-
-        # Create a visible finish line
-        ls = LineSegs()
-        ls.setThickness(10.0)  # Thicker line for better visibility
-        ls.setColor(1, 0, 0, 1)  # Red
-
-        # Draw the main line
-        ls.moveTo(start_x, start_y, 0.1)  # Slightly above ground
-        ls.drawTo(end_x, end_y, 0.1)
-
-        # Create node and add to scene
-        node = ls.create()
-        finish_line_np = NodePath(node)
-        finish_line_np.reparentTo(env.engine.render)
-        finish_line_np.setName("finish_line_base")
-
-        # Add a checkered pattern for better visibility
-        num_segments = 10
-        for i in range(num_segments):
-            ls = LineSegs()
-            ls.setThickness(10.0)
-
-            # Alternate black and white
-            if i % 2 == 0:
-                ls.setColor(0, 0, 0, 1)  # Black
-            else:
-                ls.setColor(1, 1, 1, 1)  # White
-
-            # Calculate segment position
-            seg_start_x = start_x + (end_x - start_x) * (i / num_segments)
-            seg_start_y = start_y + (end_y - start_y) * (i / num_segments)
-            seg_end_x = start_x + (end_x - start_x) * ((i + 1) / num_segments)
-            seg_end_y = start_y + (end_y - start_y) * ((i + 1) / num_segments)
-
-            # Draw segment
-            ls.moveTo(seg_start_x, seg_start_y, 0.15)  # Slightly above the base line
-            ls.drawTo(seg_end_x, seg_end_y, 0.15)
-
-            # Create node and add to scene
-            node = ls.create()
-            segment_np = NodePath(node)
-            segment_np.reparentTo(env.engine.render)
-            segment_np.setName(f"finish_line_segment_{i}")
-
-        # Add vertical poles at the ends of the finish line for better visibility
-        for end_pos_x, end_pos_y in [(start_x, start_y), (end_x, end_y)]:
-            ls = LineSegs()
-            ls.setThickness(8.0)  # Thicker poles
-            ls.setColor(1, 0, 0, 1)  # Red poles
-
-            # Draw a vertical pole
-            ls.moveTo(end_pos_x, end_pos_y, 0)
-            ls.drawTo(end_pos_x, end_pos_y, 5.0)  # 5 units high
-
-            # Create node and add to scene
-            node = ls.create()
-            pole_np = NodePath(node)
-            pole_np.reparentTo(env.engine.render)
-            pole_np.setName("finish_line_pole")
-
-        print("Finish line visualization created successfully")
-    except Exception as e:
-        print(f"Error creating finish line visualization: {e}")
+    # Mark finish line as invisible if it exists
+    if hasattr(env, 'finish_line') and env.finish_line:
+        env.finish_line["visible"] = False
+        print("Finish line visualization disabled")
 
 # Custom wrapper for the cost function to halt computations for finished agents
 def custom_cost_function_wrapper(env, vehicle_id):
@@ -789,6 +636,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0, help="Random seed for the environment")
     parser.add_argument("--manual_control", action="store_true", help="Enable manual control for testing")
+    parser.add_argument("--models_dir", type=str, default="trained_models", help="Directory to save models")
+    parser.add_argument("--use_sb3_ppo", action="store_true", help="Use Stable-Baselines3 PPO instead of the default expert")
     args = parser.parse_args()
 
     # Configure environment
@@ -810,8 +659,8 @@ if __name__ == "__main__":
             "random_lane_num": False,  # Keep lane number consistent
 
             # ===== Traffic Settings =====
-            # Add traffic to the environment with a density of 0.1
-            "traffic_density": 0.1,  # Controls the number of traffic vehicles (0.0 to 1.0)
+            # Add traffic to the environment with a density of 0.15
+            "traffic_density": 0.15,  # Controls the number of traffic vehicles (0.0 to 1.0)
             "traffic_mode": "trigger",  # Traffic appears when agent approaches
             "random_traffic": True,  # Randomize traffic positions
 
@@ -854,7 +703,8 @@ if __name__ == "__main__":
     print("- Collisions and out-of-road events will not terminate the episode")
     print("- The episode will continue until BOTH cars cross the finish line or max steps (2000) are reached")
     print("- The track is randomly generated but reproducible with the same seed")
-    print("- Traffic vehicles are present with a density of 0.1")
+    print("- Traffic vehicles are present with a density of 0.15")
+    print("- Lane width is set to 4.0 units (wider than default 3.5)")
     print("- The finish line is positioned at the end of the final track segment")
     print("- Cars will be removed from the simulation after crossing the finish line")
     print("- Each car's model weights are preserved when it finishes the race")
@@ -862,6 +712,12 @@ if __name__ == "__main__":
     print("- The leading car receives bonus rewards")
     print("- The first car to cross the finish line wins the race and receives a winning reward")
     print("- The race winner is displayed and a new race begins after both cars finish")
+    if args.use_sb3_ppo:
+        print("\nStable-Baselines3 PPO Training:")
+        print(f"- Using SB3 PPO instead of the default expert")
+        print(f"- Models are saved to {args.models_dir}")
+        print(f"- Models are updated after each episode")
+        print(f"- Press BACKSPACE to manually reset the episode and reinitialize weights")
 
     # Initialize variables to track race state
     previous_winner = None
@@ -885,8 +741,48 @@ if __name__ == "__main__":
     if not hasattr(env, 'finished_agents'):
         env.finished_agents = set()  # Set of agent IDs that have crossed the finish line
 
-    # Reset the environment
+    # If using SB3 PPO, set up the trainer and replace the expert
+    if args.use_sb3_ppo:
+        # Create directory for saving models if it doesn't exist
+        os.makedirs(args.models_dir, exist_ok=True)
+
+        # We need to reset first to initialize the environment
+        temp_obs, _ = env.reset()
+
+        # Initialize the global PPO trainer and attach it to the environment
+        from metadrive.examples.sb3_ppo_policy import initialize_global_ppo_trainer
+        ppo_trainer = initialize_global_ppo_trainer(env, args.models_dir, use_expert_weights=True)
+
+        # Verify that the PPO trainer is properly attached to the environment
+        if hasattr(env.engine, 'ppo_trainer') and env.engine.ppo_trainer is not None:
+            print("Verified that PPO trainer is attached to the environment engine")
+        else:
+            print("WARNING: PPO trainer is not properly attached to the environment engine")
+            # Attach it manually as a fallback
+            env.engine.ppo_trainer = ppo_trainer
+
+        # Print debug information about the environment and agents
+        print("\n==== DEBUG: ENVIRONMENT INFORMATION ====")
+        print(f"Environment type: {type(env).__name__}")
+        print(f"Engine type: {type(env.engine).__name__}")
+        print(f"Number of agents: {len(env.agents)}")
+        print(f"Agent IDs: {list(env.agents.keys())}")
+        print(f"Observation space: {env.observation_space}")
+        print(f"Action space: {env.action_space}")
+        print("==== END DEBUG ====\n")
+
+        print("Initialized SB3 PPO trainer and replaced expert")
+
+    # Reset the environment (again if we're using SB3 PPO)
     obs, _ = env.reset()
+
+    # Print debug information about agents
+    print("\n==== DEBUG: AGENT INFORMATION ====")
+    print(f"Agent IDs in env.agents: {list(env.agents.keys())}")
+    print(f"Agent IDs in observation: {list(obs.keys())}")
+    for agent_id, agent in env.agents.items():
+        print(f"Agent ID: {agent_id}, Type: {type(agent).__name__}, Vehicle ID: {agent.id if hasattr(agent, 'id') else 'N/A'}")
+    print("==== END DEBUG ====\n")
 
     # Set expert_takeover to True for all agents to enable autodrive
     for agent_id, agent in env.agents.items():
@@ -895,7 +791,35 @@ if __name__ == "__main__":
 
     # Fix and verify the finish line placement
     print("\nFixing and verifying finish line placement...")
-    fix_finish_line_placement(env)
+    try:
+        if not fix_finish_line_placement(env):
+            print("Failed to create finish line using standard method, creating a default finish line")
+            # Create a default finish line (invisible)
+            env.finish_line = {
+                "position": (500.0, 0.0),  # Fixed position far from start
+                "width": 100.0,  # Very wide to ensure detection
+                "heading": 0.0,  # Default heading
+                "finish_time": None,
+                "visible": False,  # Don't show the finish line
+                "detection_buffer": 20.0,  # Very large buffer for detection
+                "final_lane": None,  # No specific lane
+                "crossed_positions": {}
+            }
+            # Remove any existing finish line visualization
+            create_finish_line_visualization(env)
+    except Exception as e:
+        print(f"Error creating finish line: {e}")
+        # Create a simple default finish line (invisible)
+        env.finish_line = {
+            "position": (500.0, 0.0),
+            "width": 100.0,
+            "heading": 0.0,
+            "finish_time": None,
+            "visible": False,  # Don't show the finish line
+            "detection_buffer": 20.0,
+            "final_lane": None,
+            "crossed_positions": {}
+        }
 
     # Override the environment's cost and reward functions with our custom wrappers
     # that halt computations for agents that have crossed the finish line
@@ -916,11 +840,52 @@ if __name__ == "__main__":
 
     # Main simulation loop
     for i in range(1, 100000):
-        # Default action is to do nothing
-        actions = {agent_id: [0, 0] for agent_id in env.agents.keys()}
+        try:
+            # Default action is to do nothing
+            actions = {agent_id: [0, 0] for agent_id in env.agents.keys()}
 
-        # Step the environment
-        obs, rewards, terminated, truncated, info = env.step(actions)
+            # Step the environment
+            obs, rewards, terminated, truncated, info = env.step(actions)
+        except Exception as e:
+            print(f"Error in simulation step: {e}")
+            # Reset the environment and continue
+            print("Resetting environment due to error...")
+            obs, _ = env.reset()
+            continue
+
+        # Process keyboard events for manual reset (if using SB3 PPO)
+        if args.use_sb3_ppo and hasattr(env.engine, 'accept_action') and env.engine.global_config["manual_control"]:
+            # Handle manual reset with BACKSPACE key
+            if env.engine.accept_action("backspace"):
+                print("\nManual reset triggered - reinitializing weights for this episode")
+
+                # Reset the models for all agents
+                if hasattr(env.engine, 'ppo_trainer'):
+                    for agent_id in env.agents.keys():
+                        env.engine.ppo_trainer.reset_agent_model(f"agent_{agent_id}")
+
+                # Reset the environment
+                obs, _ = env.reset()
+
+                # Set expert_takeover to True for all agents
+                for agent_id, agent in env.agents.items():
+                    agent.expert_takeover = True
+                    print(f"Reset agent {agent_id} to expert takeover mode")
+
+                # Fix and verify the finish line placement
+                print("\nFixing and verifying finish line placement after manual reset...")
+                fix_finish_line_placement(env)
+
+                # Clear finish tracking variables
+                finish_order.clear()
+                finish_times.clear()
+                reset_timer = None
+
+                # Clear the set of finished agents
+                if hasattr(env, 'finished_agents'):
+                    env.finished_agents.clear()
+
+                print("Manual reset complete - weights reinitialized for this episode")
 
         # Debug: Print if any agent is terminated and why
         for agent_id, is_terminated in terminated.items():
@@ -950,15 +915,15 @@ if __name__ == "__main__":
             else:
                 step_costs[agent_id] = 0.0
 
-        # Check if any agent has crossed the finish line
+        # Check if any agent has reached its destination
         # First, check the environment's finish_line_crossed dictionary
         for agent_id in env.agents.keys():
-            # Check if this agent just crossed the finish line (either from info or env.finish_line_crossed)
-            finish_line_crossed = (agent_id in env.finish_line_crossed and env.finish_line_crossed[agent_id]) or \
+            # Check if this agent just reached its destination (either from info or env.finish_line_crossed)
+            destination_reached = (agent_id in env.finish_line_crossed and env.finish_line_crossed[agent_id]) or \
                                  (agent_id in info and info[agent_id].get("finish_line_crossed", False))
 
-            if finish_line_crossed and agent_id not in finish_order and agent_id not in removed_agents:
-                print(f"Detected finish line crossing for agent {agent_id}")
+            if destination_reached and agent_id not in finish_order and agent_id not in removed_agents:
+                print(f"Detected destination arrival for agent {agent_id}")
                 finish_order.append(agent_id)
                 finish_times[agent_id] = time.time()
 
@@ -973,27 +938,27 @@ if __name__ == "__main__":
                     # Remove the agent from the simulation
                     remove_agent_from_simulation(env, agent_id)
                     removed_agents.add(agent_id)
-                    print(f"Agent {agent_id} has been removed from simulation after crossing finish line")
+                    print(f"Agent {agent_id} has been removed from simulation after reaching destination")
 
                 # If this is the first agent to cross, mark it as the winner
                 if len(finish_order) == 1:
                     env.race_winner = agent_id
                     env.race_finished = True
-                    print(f"Agent {agent_id} has crossed the finish line first and won the race!")
+                    print(f"Agent {agent_id} has reached the destination first and won the race!")
                 else:
-                    print(f"Agent {agent_id} has crossed the finish line (position: {len(finish_order)})")
+                    print(f"Agent {agent_id} has reached the destination (position: {len(finish_order)})")
 
-                # If all agents have crossed the finish line, start the reset timer
+                # If all agents have reached their destinations, start the reset timer
                 # We need to check if the number of agents that have finished equals the total number of agents
                 # The total number of agents is the initial number of agents (which is 2 in this case)
                 total_agents = env.config["num_agents"]  # This should be 2 for the racing environment
                 print(f"Finish check: {len(finish_order)} agents finished out of {total_agents} total agents")
 
-                # Only reset when ALL agents have crossed the finish line
+                # Only reset when ALL agents have reached their destinations
                 # This ensures the episode continues until both cars reach the end
                 if len(finish_order) >= total_agents:
                     reset_timer = time.time()
-                    print(f"All agents have crossed the finish line. Resetting in {reset_delay} seconds...")
+                    print(f"All agents have reached their destinations. Resetting in {reset_delay} seconds...")
 
         # Check if it's time to reset after all agents have finished
         if reset_timer is not None and time.time() - reset_timer >= reset_delay:
@@ -1002,6 +967,11 @@ if __name__ == "__main__":
                 previous_winner = env.race_winner
                 race_count += 1
                 print(f"Race {race_count} completed. Winner: {previous_winner}")
+
+            # If using SB3 PPO, save the models
+            if args.use_sb3_ppo and hasattr(env.engine, 'ppo_trainer'):
+                env.engine.ppo_trainer.end_episode()
+                print("Saved PPO models at the end of the episode")
 
             # Perform a thorough reset of the environment
             print("Resetting environment...")

@@ -3,7 +3,6 @@ from metadrive.engine.engine_utils import get_global_config
 import numpy as np
 
 from metadrive.policy.base_policy import BasePolicy
-from metadrive.utils.math import clip
 
 
 class EnvInputPolicy(BasePolicy):
@@ -32,8 +31,19 @@ class EnvInputPolicy(BasePolicy):
             )
         to_process = self.convert_to_continuous_action(action) if self.discrete_action else action
 
-        # clip to -1, 1
-        action = [clip(to_process[i], -1.0, 1.0) for i in range(len(to_process))]
+        # Handle different action formats
+        import numpy as np
+        if isinstance(to_process, np.ndarray):
+            # If it's a numpy array, ensure it's 1D and clip it
+            if len(to_process.shape) > 1:
+                # If it's a 2D array (e.g., [[steer, throttle]]), flatten it
+                to_process = to_process.flatten()
+            # Use numpy's clip function directly for numpy arrays
+            action = np.clip(to_process, -1.0, 1.0)
+        else:
+            # Original behavior for non-numpy actions
+            action = [min(max(to_process[i], -1.0), 1.0) for i in range(len(to_process))]
+
         self.action_info["action"] = action
         return action
 
@@ -105,8 +115,19 @@ class ExtraEnvInputPolicy(EnvInputPolicy):
             )
         to_process = self.convert_to_continuous_action(action) if self.discrete_action else action
 
-        # clip to -1, 1
-        action = [clip(to_process[i], -1.0, 1.0) for i in range(len(to_process))]
+        # Handle different action formats
+        import numpy as np
+        if isinstance(to_process, np.ndarray):
+            # If it's a numpy array, ensure it's 1D and clip it
+            if len(to_process.shape) > 1:
+                # If it's a 2D array (e.g., [[steer, throttle]]), flatten it
+                to_process = to_process.flatten()
+            # Use numpy's clip function directly for numpy arrays
+            action = np.clip(to_process, -1.0, 1.0)
+        else:
+            # Original behavior for non-numpy actions
+            action = [min(max(to_process[i], -1.0), 1.0) for i in range(len(to_process))]
+
         self.action_info["action"] = action
         return action
 

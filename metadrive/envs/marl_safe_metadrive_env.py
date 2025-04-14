@@ -189,6 +189,9 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
 
         # Initialize agent positions and tracking variables after reset
         for agent_id, agent in self.agents.items():
+            # Ensure all agents are in autodrive mode (expert takeover)
+            agent.expert_takeover = True
+
             self.agent_positions[agent_id] = agent.position
             self.off_road_counter[agent_id] = 0
             self.off_road_status[agent_id] = False
@@ -196,6 +199,8 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
             self.wrong_side_status[agent_id] = False
             self.agent_checkpoints[agent_id] = set()  # Track which checkpoints this agent has passed
             self.finish_line_crossed[agent_id] = False  # Reset finish line crossing status
+
+            print(f"Set agent {agent_id} to expert takeover mode (autodrive)")
 
         # Create checkpoints along the track
         self._create_checkpoints()
@@ -537,7 +542,7 @@ class MultiAgentRacingSafeEnv(MultiAgentMetaDrive):
             # Apply incremental cost - increases exponentially the longer the vehicle stays off-road
             # Base cost + exponential growth based on steps off-road
             # This creates a rapidly escalating penalty to strongly incentivize returning to the road
-            incremental_cost = self.config["out_of_road_cost"] * (1.0 + 0.2 * (self.off_road_counter[vehicle_id] ** 1.5))
+            incremental_cost = self.config["out_of_road_cost"] * (1.0 + 0.2 * (self.off_road_counter[vehicle_id]))
             cost += incremental_cost
 
             # Add info about off-road status
