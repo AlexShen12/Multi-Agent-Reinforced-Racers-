@@ -720,8 +720,10 @@ if __name__ == "__main__":
         print(f"- Models are saved to {args.models_dir}")
         print(f"- Models are updated after each episode")
         print(f"- Press BACKSPACE to manually reset the episode and reinitialize weights")
-    print(f"Printing action space: {env.action_space}")
-    print(f"Printing observation space: {env.observation_space}")
+
+    print(f"============Prints for RLLib============")
+    print(f"Printing action space: {env.action_spaces}")
+    print(f"Printing observation space: {env.observation_spaces}")
 
     # Initialize variables to track race state
     previous_winner = None
@@ -841,6 +843,9 @@ if __name__ == "__main__":
     print(f"Number of blocks: {len(env.engine.current_map.blocks) if hasattr(env.engine, 'current_map') and hasattr(env.engine.current_map, 'blocks') else 'Unknown'}")
     print(f"Traffic density: {env.config['traffic_density']}")
     print(f"Number of traffic vehicles: {len(env.engine.traffic_manager.traffic_vehicles) if hasattr(env.engine, 'traffic_manager') and hasattr(env.engine.traffic_manager, 'traffic_vehicles') else 0}")
+
+    for agent_id in obs.keys():
+        print(f"Obs key: {agent_id}")
 
     # Main simulation loop
     for i in range(1, 100000):

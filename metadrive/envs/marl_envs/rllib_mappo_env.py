@@ -19,6 +19,7 @@ from metadrive.constants import DEFAULT_AGENT, TerminationState
 from metadrive.envs.safe_metadrive_env import SafeMetaDriveEnv
 from metadrive.envs.marl_envs.multi_agent_metadrive import MultiAgentMetaDrive
 from metadrive.utils import Config, clip
+import gymnasium as gym
 
 # Define constants for the racing environment
 RACING_SAFE_METADRIVE_DEFAULT_CONFIG = dict(
@@ -216,6 +217,14 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
             }
             )
         super(RLLibMappoEnv, self).__init__(config)
+        self.action_spaces = {
+            "agent0": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            "agent1": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        }
+        self.observation_spaces = {
+            "agent0": gym.spaces.Box(low=0.0, high=1.0, shape=(91,), dtype=np.float32),
+            "agent1": gym.spaces.Box(low=0.0, high=1.0, shape=(91,), dtype=np.float32)
+        }
 
         # Initialize episode cost tracking for each agent
         self.episode_cost = {}
