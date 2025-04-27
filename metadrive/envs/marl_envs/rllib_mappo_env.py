@@ -23,7 +23,11 @@ import gymnasium as gym
 
 # Define constants for the racing environment
 RACING_SAFE_METADRIVE_DEFAULT_CONFIG = dict(
+    # ===== Stuff ChatGPT said to add =====
+    action_check=False, # If action_check is left at its Safe-MetaDrive default True, every action is clipped to ±1 and any NaNs are replaced by zeros.
+
     # ===== Multi-agent settings =====
+    manual_control=False, # Default
     is_multi_agent=True,
     num_agents=2,  # Fixed at 2 for racing scenario
     allow_respawn=False,  # No respawning in racing
@@ -33,9 +37,12 @@ RACING_SAFE_METADRIVE_DEFAULT_CONFIG = dict(
     # ===== Racing settings =====
     # Reward for being in the lead
     leading_reward_factor=0.1,  # Reward multiplier for being in the lead
-    winning_reward=10.0,  # Additional reward for winning the race
-    checkpoint_reward=2.0,  # Reward for reaching a checkpoint
-    first_checkpoint_bonus=1.0,  # Additional bonus for being first to reach a checkpoint
+    winning_reward=100.0,  # Additional reward for winning the race
+    # winning_reward=10.0,  # Additional reward for winning the race
+    checkpoint_reward=20.0,  # Reward for reaching a checkpoint
+    # checkpoint_reward=2.0,  # Reward for reaching a checkpoint
+    # first_checkpoint_bonus=1.0,  # Additional bonus for being first to reach a checkpoint
+    first_checkpoint_bonus=5.0,  # Additional bonus for being first to reach a checkpoint
     num_checkpoints=5,  # Number of checkpoints to place around the track
 
     # ===== Finish line settings =====
@@ -113,109 +120,56 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
         return config
 
     def __init__(self, config=None):
-        # Initialize with MultiAgentMetaDrive
         if config==None:
-            config = {
-                # "use_render": True,
-                "manual_control": True,
-                "num_agents": 2,
-                # "start_seed": args.seed,  # Use the provided seed for reproducible track generation
-                "horizon": 2000,  # Increase max steps to ensure agents have enough time to reach the finish line
+            config = {}
+        config.update({
+            "num_agents": 2,
+            # "start_seed": args.seed,  # Use the provided seed for reproducible track generation
+            "horizon": 2000,  # Increase max steps to ensure agents have enough time to reach the finish line
 
-                # ===== Random Track Generation =====
-                "num_scenarios": 100,  # Generate a large number of different scenarios
-                # Instead of using a fixed map like "CSRCR", we'll use a random map
-                # Setting map to an integer value will generate a random track with that many blocks
-                "map": 5,  # Generate a random track with 5 blocks
-                "random_agent_model": False,  # Use consistent vehicle models
-                "random_lane_width": True,  # Randomize lane width
-                "random_lane_num": False,  # Keep lane number consistent
+            # ===== Random Track Generation =====
+            "num_scenarios": 100,  # Generate a large number of different scenarios
+            # Instead of using a fixed map like "CSRCR", we'll use a random map
+            # Setting map to an integer value will generate a random track with that many blocks
+            "map": 5,  # Generate a random track with 5 blocks
+            "random_agent_model": False,  # Use consistent vehicle models
+            "random_lane_width": True,  # Randomize lane width
+            "random_lane_num": False,  # Keep lane number consistent
 
-                # ===== Traffic Settings =====
-                # Add traffic to the environment with a density of 0.15
-                "traffic_density": 0.15,  # Controls the number of traffic vehicles (0.0 to 1.0)
-                "traffic_mode": "trigger",  # Traffic appears when agent approaches
-                "random_traffic": True,  # Randomize traffic positions
+            # ===== Traffic Settings =====
+            # Add traffic to the environment with a density of 0.15
+            "traffic_density": 0.15,  # Controls the number of traffic vehicles (0.0 to 1.0)
+            "traffic_mode": "trigger",  # Traffic appears when agent approaches
+            "random_traffic": True,  # Randomize traffic positions
 
-                # ===== Agent Settings =====
-                "use_AI_protector": True,  # Ensure both agents use autodrive
+            # ===== Agent Settings =====
+            # "use_AI_protector": True,  # Ensure both agents use autodrive
+            "use_AI_protector": False,  # THIS USES AI TO STEER YOU BACK INTO THE LANE. DO NOT ENABLE
 
-                # ===== Finish Line Settings =====
-                "enable_finish_line": True,  # Add a definitive finish line
-                "finish_line_at_end": True,  # Place finish line at the end of the last track segment
-                "terminate_on_finish": False,  # IMPORTANT: Don't end episode until both agents cross the finish line
+            # ===== Finish Line Settings =====
+            "enable_finish_line": True,  # Add a definitive finish line
+            "finish_line_at_end": True,  # Place finish line at the end of the last track segment
+            "terminate_on_finish": False,  # IMPORTANT: Don't end episode until both agents cross the finish line
 
-                # ===== Termination Settings =====
-                # Disable all termination conditions that might end the episode prematurely
-                "crash_vehicle_done": False,  # Don't end when vehicles crash
-                "crash_object_done": False,  # Don't end when hitting objects
-                "out_of_road_done": False,  # Don't end when going off-road
-                "on_continuous_line_done": False,  # Don't end when crossing continuous lines
-                "on_broken_line_done": False,  # Don't end when crossing broken lines
-                "out_of_route_done": False,  # Don't end when going off route
-                "crash_done": False,  # Don't end on any crash
-                "truncate_as_terminate": False,  # Don't treat truncation as termination
+            # ===== Termination Settings =====
+            # Disable all termination conditions that might end the episode prematurely
+            "crash_vehicle_done": False,  # Don't end when vehicles crash
+            "crash_object_done": False,  # Don't end when hitting objects
+            "out_of_road_done": False,  # Don't end when going off-road
+            "on_continuous_line_done": False,  # Don't end when crossing continuous lines
+            "on_broken_line_done": False,  # Don't end when crossing broken lines
+            "out_of_route_done": False,  # Don't end when going off route
+            "crash_done": False,  # Don't end on any crash
+            "truncate_as_terminate": False,  # Don't treat truncation as termination
 
-                # ===== Vehicle Configuration =====
-                "vehicle_config": {
-                    "enable_reverse": True,
-                    "show_lidar": False,
-                    "show_side_detector": False,
-                    "show_lane_line_detector": False,
-                }
+            # ===== Vehicle Configuration =====
+            "vehicle_config": {
+                "enable_reverse": True,
+                "show_lidar": False,
+                "show_side_detector": False,
+                "show_lane_line_detector": False,
             }
-        else:
-            config.update(
-            {
-                # "use_render": True,
-                "manual_control": True,
-                "num_agents": 2,
-                # "start_seed": args.seed,  # Use the provided seed for reproducible track generation
-                "horizon": 2000,  # Increase max steps to ensure agents have enough time to reach the finish line
-
-                # ===== Random Track Generation =====
-                "num_scenarios": 100,  # Generate a large number of different scenarios
-                # Instead of using a fixed map like "CSRCR", we'll use a random map
-                # Setting map to an integer value will generate a random track with that many blocks
-                "map": 5,  # Generate a random track with 5 blocks
-                "random_agent_model": False,  # Use consistent vehicle models
-                "random_lane_width": True,  # Randomize lane width
-                "random_lane_num": False,  # Keep lane number consistent
-
-                # ===== Traffic Settings =====
-                # Add traffic to the environment with a density of 0.15
-                "traffic_density": 0.15,  # Controls the number of traffic vehicles (0.0 to 1.0)
-                "traffic_mode": "trigger",  # Traffic appears when agent approaches
-                "random_traffic": True,  # Randomize traffic positions
-
-                # ===== Agent Settings =====
-                "use_AI_protector": True,  # Ensure both agents use autodrive
-
-                # ===== Finish Line Settings =====
-                "enable_finish_line": True,  # Add a definitive finish line
-                "finish_line_at_end": True,  # Place finish line at the end of the last track segment
-                "terminate_on_finish": False,  # IMPORTANT: Don't end episode until both agents cross the finish line
-
-                # ===== Termination Settings =====
-                # Disable all termination conditions that might end the episode prematurely
-                "crash_vehicle_done": False,  # Don't end when vehicles crash
-                "crash_object_done": False,  # Don't end when hitting objects
-                "out_of_road_done": False,  # Don't end when going off-road
-                "on_continuous_line_done": False,  # Don't end when crossing continuous lines
-                "on_broken_line_done": False,  # Don't end when crossing broken lines
-                "out_of_route_done": False,  # Don't end when going off route
-                "crash_done": False,  # Don't end on any crash
-                "truncate_as_terminate": False,  # Don't treat truncation as termination
-
-                # ===== Vehicle Configuration =====
-                "vehicle_config": {
-                    "enable_reverse": True,
-                    "show_lidar": False,
-                    "show_side_detector": False,
-                    "show_lane_line_detector": False,
-                }
-            }
-            )
+        })
         super(RLLibMappoEnv, self).__init__(config)
         self.action_spaces = {
             "agent0": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
@@ -297,11 +251,16 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
 
         # Reset the environment
         obs, info = super(RLLibMappoEnv, self).reset(*args, **kwargs)
+        self.previous_positions = {
+            agent_id: agent.position
+            for agent_id, agent in self.agents.items()
+        }
 
         # Initialize agent positions and tracking variables after reset
         for agent_id, agent in self.agents.items():
-            # Ensure all agents are in autodrive mode (expert takeover)
-            agent.expert_takeover = True
+            # COMMENTED OUT
+            # # Ensure all agents are in autodrive mode (expert takeover)
+            # agent.expert_takeover = True
 
             self.agent_positions[agent_id] = agent.position
             self.off_road_counter[agent_id] = 0
@@ -311,7 +270,8 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
             self.agent_checkpoints[agent_id] = set()  # Track which checkpoints this agent has passed
             self.finish_line_crossed[agent_id] = False  # Reset finish line crossing status
 
-            print(f"Set agent {agent_id} to expert takeover mode (autodrive)")
+            # COMMENTED OUT
+            # print(f"Set agent {agent_id} to expert takeover mode (autodrive)")
 
         # Create checkpoints along the track
         self._create_checkpoints()
@@ -357,12 +317,14 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
                     current_time = time.time()
                     elapsed_time = current_time - self.finish_line["finish_time"]
 
+                    # COMMENTED OUT
                     # If 3 seconds have passed, terminate all agents
-                    if elapsed_time >= 3.0:
+                    # if elapsed_time >= 3.0:
+                    if elapsed_time >= 1.0:
                         # Set all agents to terminated
                         for agent_id in self.agents.keys():
                             terminated[agent_id] = True
-                        print("3 seconds elapsed after finish line crossing. Ending episode.")
+                        print("1 second elapsed after finish line crossing. Ending episode.")
 
         # Apply racing rewards
         rewards = self._apply_racing_rewards(rewards, info)
@@ -555,7 +517,6 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
                 modified_rewards[agent_id] += self.config["winning_reward"]
                 if agent_id in info:
                     info[agent_id]["winning_reward"] = self.config["winning_reward"]
-
         return modified_rewards
 
     def _apply_checkpoint_rewards(self, rewards, info):
@@ -1015,7 +976,7 @@ class RLLibMappoEnv(MultiAgentMetaDrive):
                                 info[agent_id]["finish_line_crossed"] = True
 
                             print(f"Agent {agent_id} has crossed the finish line and won the race!")
-                            print(f"Episode will end in 3 seconds...")
+                            print(f"Episode will end in 1 seconds...")
 
     def done_function(self, vehicle_id):
         """
@@ -1074,7 +1035,7 @@ if __name__ == "__main__":
     env = RLLibMappoEnv(
         {
             "use_render": True,
-            "manual_control": True,
+            # "manual_control": True,
             "num_agents": 2,
             "map": "CSRCR",  # Use a circular map for racing
             "vehicle_config": {
