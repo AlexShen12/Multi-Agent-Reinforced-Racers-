@@ -4,6 +4,7 @@ from metadrive.envs.marl_envs.rllib_mappo_env import RLLibMappoEnv
 import gymnasium as gym
 from ray.rllib.core.rl_module.rl_module import RLModule
 import os
+from metadrive.envs.rllib_delegator_env import RLLibDelegatorEnv 
 
 checkpoint_base_directory ="/Users/jameswalker/Programming/Checkpoints/MappoCheckpoint"
 checkpoint_number = 6
@@ -39,7 +40,8 @@ agent_modules = {
 action_dist_cls = {
     aid: mod.get_inference_action_dist_cls() for aid, mod in agent_modules.items()
 }
-
+# Training uses RLLibDelegatorEnv because it defines its actions and observations and possible agents and agents
+# env = RLLibDelegatorEnv({ "use_render": True,})
 env = RLLibMappoEnv(
     {
         "use_render": True,
@@ -72,18 +74,18 @@ try:
                 # old_fwd_outputs = agent_modules[aid].forward_exploration(old_fwd_ins)
                 # old_action_dist = action_dist_cls[aid].from_logits(old_fwd_outputs["action_dist_inputs"])
                 # old_action = old_action_dist.sample()[0].numpy()
-
+        print("Actions: ", actions)
         obs, reward, terminated, truncated, info = env.step(actions)
 
-        if env.config["use_render"]:
-            # Render with race information
-            env.render(
-                text={
-                    "Race Progress": {agent_id: f"{progress:.2f}" for agent_id, progress in env.agent_progress.items()},
-                    "Leading": next((agent_id for agent_id in env.agents.keys() if env.agent_progress.get(agent_id, 0) == max(env.agent_progress.values())), None),
-                    "Race Winner": env.race_winner if env.race_finished else "None",
-                }
-            )
+        # if env.config["use_render"]:
+        #     # Render with race information
+        #     env.render(
+        #         text={
+        #             "Race Progress": {agent_id: f"{progress:.2f}" for agent_id, progress in env.agent_progress.items()},
+        #             "Leading": next((agent_id for agent_id in env.agents.keys() if env.agent_progress.get(agent_id, 0) == max(env.agent_progress.values())), None),
+        #             "Race Winner": env.race_winner if env.race_finished else "None",
+        #         }
+        #     )
 
         # Check if all agents are done
         if all(terminated.values()):

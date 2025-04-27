@@ -30,7 +30,7 @@ RACING_SAFE_METADRIVE_DEFAULT_CONFIG = dict(
     manual_control=False, # Default
     is_multi_agent=True,
     num_agents=2,  # Fixed at 2 for racing scenario
-    allow_respawn=False,  # No respawning in racing
+    allow_respawn=False,  # Fixes the agent number in the environment
 
     # Ensure we're using the correct agent IDs
 
