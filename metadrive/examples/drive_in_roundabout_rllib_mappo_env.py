@@ -8,7 +8,7 @@ import os
 # THIS FILE IS FOR USING THE TRAINED RLLib MAPPO ON METADRIVE's GIVEN ROUNDABOUT ENV
 
 checkpoint_base_directory ="/Users/jameswalker/Programming/Checkpoints3/MappoCheckpoint"
-checkpoint_number = 3
+checkpoint_number = 2
 checkpoint_directory = checkpoint_base_directory + str(checkpoint_number)
 
 agent0_rl_module = RLModule.from_checkpoint(
@@ -41,14 +41,11 @@ action_dist_cls = {
 
 env = RoundaboutRLLibDelegatorEnv(
     {
-        # "start_seed": 0,
         "use_render": True,
-        # "manual_control": True,
+        # "manual_control": True, # If you want to drive agent0 by keyboard
     }
 )
 obs, info = env.reset()
-
-episode_cost = {"agent0": 0, "agent1": 0}
 
 try:
     for step in range(1, 10_000):
@@ -59,20 +56,10 @@ try:
         actions = {}
         with torch.no_grad():
             for agent_id, single_obs in obs.items():
-                # ChatGPT says this way is faster/better
                 fwd_inputs = {"obs": torch.as_tensor(single_obs).unsqueeze(0)}
-                out = agent_modules[agent_id].forward_exploration(fwd_inputs)
+                out = agent_modules[agent_id].forward_inference(fwd_inputs)
                 dist = action_dist_cls[agent_id].from_logits(out["action_dist_inputs"])
-                # dist.to_deterministic()
                 actions[agent_id] = dist.sample()[0].cpu().numpy()
-                # actions[aid] = dist.sample()
-
-                # Compare with old
-                # old_fwd_ins = {"obs": torch.Tensor([ob])}
-                # old_fwd_outputs = agent_modules[aid].forward_exploration(old_fwd_ins)
-                # old_action_dist = action_dist_cls[aid].from_logits(old_fwd_outputs["action_dist_inputs"])
-                # old_action = old_action_dist.sample()[0].numpy()
-                # actions[aid] = old_action
 
         obs, reward, terminated, truncated, info = env.step(actions)
 

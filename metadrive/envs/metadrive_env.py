@@ -270,23 +270,31 @@ class MetaDriveEnv(BaseEnv):
             lateral_factor = 1.0
 
         reward = 0.0
+        # print("===== REWARDED for driving reward", self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road)
         reward += self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road
+        # print("===== REWARDED for speed reward", self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road)
         reward += self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road
 
         step_info["step_reward"] = reward
 
         if self._is_arrive_destination(vehicle):
+            # print("===== REWARDED for arriving at destination/success_reward", self.config["success_reward"])
             reward = +self.config["success_reward"]
         elif self._is_out_of_road(vehicle):
+            # print("===== PENALIZED out of road", -self.config["out_of_road_penalty"])
             reward = -self.config["out_of_road_penalty"]
         elif vehicle.crash_vehicle:
+            # print("===== PENALIZED crashed vehicle", -self.config["crash_vehicle_penalty"])
             reward = -self.config["crash_vehicle_penalty"]
         elif vehicle.crash_object:
+            # print("===== PENALIZED crashed object", -self.config["crash_object_penalty"])
             reward = -self.config["crash_object_penalty"]
         elif vehicle.crash_sidewalk:
+            # print("===== PENALIZED crashed object", -self.config["crash_sidewalk_penalty"])
             reward = -self.config["crash_sidewalk_penalty"]
         step_info["route_completion"] = vehicle.navigation.route_completion
 
+        self.BIG_REWARD += reward
         return reward, step_info
     
     def setup_engine(self):

@@ -44,6 +44,7 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
             
         })
         self.env = MultiAgentRoundaboutEnv(config)
+        self.env.BIG_REWARD = 0
         self.agents = self.possible_agents = ["agent0", "agent1"]
         
         # Set action_spaces and observation_spaces
@@ -51,6 +52,8 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
         self.observation_spaces = self.env.observation_space
 
     def reset(self, *, seed=None, options=None):
+        print("Overall reward", self.env.BIG_REWARD)
+        self.env.BIG_REWARD = 0
         return self.env.reset(seed=seed, options=options)
 
     def step(self, action_dict):
