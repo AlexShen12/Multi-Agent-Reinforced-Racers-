@@ -10,3 +10,7 @@ env = RoundaboutRLLibDelegatorEnv(
     }
 )
 env.print_config()
+#print(env.action_spaces)
+#print(env.observation_spaces)
+# Observation spaces: Dict('agent0': Box(-0.0, 1.0, (91,), float32), 'agent1': Box(-0.0, 1.0, (91,), float32))
+# Action spaces: Dict('agent0': Box(-1.0, 1.0, (2,), float32), 'agent1': Box(-1.0, 1.0, (2,), float32))

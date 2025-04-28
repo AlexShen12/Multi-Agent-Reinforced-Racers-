@@ -3,6 +3,7 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from metadrive.envs.marl_envs.marl_inout_roundabout import MultiAgentRoundaboutEnv
 from metadrive.constants import DEFAULT_AGENT
 from metadrive.utils.config import Config
+from metadrive.obs.state_obs import LidarStateObservation
 
 class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
     def __init__(self, config=None):
@@ -16,6 +17,9 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
             "crash_vehicle_done":False,
             "crash_object_done":False,
             "out_of_road_done": False,
+            "use_lateral_reward": False, # Do not reward it for lane-keeping (road-keeping is a different thing)
+            "agent_observation": LidarStateObservation,
+
 
             # ===== Cost settings =====
             # "crash_vehicle_cost": 13,
@@ -45,16 +49,25 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
         })
         self.env = MultiAgentRoundaboutEnv(config)
         self.env.BIG_REWARD = 0
+        self.env.BIG_DRIVING_REWARD = 0
+        self.env.BIG_SPEED_REWARD = 0
         self.agents = self.possible_agents = ["agent0", "agent1"]
         
         # Set action_spaces and observation_spaces
         self.action_spaces = self.env.action_space
         self.observation_spaces = self.env.observation_space
+        self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
 
     def reset(self, *, seed=None, options=None):
-        print("Overall reward", self.env.BIG_REWARD)
+        print("Overall episode reward", self.env.BIG_REWARD)
+        print("Overall episode driving reward", self.env.BIG_DRIVING_REWARD)
+        print("Overall episode speed reward", self.env.BIG_SPEED_REWARD)
         self.env.BIG_REWARD = 0
-        return self.env.reset(seed=seed, options=options)
+        self.env.BIG_DRIVING_REWARD = 0
+        self.env.BIG_SPEED_REWARD = 0
+        obs, info = self.env.reset(seed=seed, options=options)
+        return obs, info
 
     def step(self, action_dict):
         return self.env.step(action_dict)
