@@ -48,9 +48,9 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
             
         })
         self.env = MultiAgentRoundaboutEnv(config)
-        self.env.BIG_REWARD = 0
-        self.env.BIG_DRIVING_REWARD = 0
-        self.env.BIG_SPEED_REWARD = 0
+        # self.env.BIG_REWARD = 0
+        # self.env.BIG_DRIVING_REWARD = 0
+        # self.env.BIG_SPEED_REWARD = 0
         self.agents = self.possible_agents = ["agent0", "agent1"]
         
         # Set action_spaces and observation_spaces
@@ -60,12 +60,12 @@ class RoundaboutRLLibDelegatorEnv(MultiAgentEnv):
         self.observation_space = self.env.observation_space
 
     def reset(self, *, seed=None, options=None):
-        print("Overall episode reward", self.env.BIG_REWARD)
-        print("Overall episode driving reward", self.env.BIG_DRIVING_REWARD)
-        print("Overall episode speed reward", self.env.BIG_SPEED_REWARD)
-        self.env.BIG_REWARD = 0
-        self.env.BIG_DRIVING_REWARD = 0
-        self.env.BIG_SPEED_REWARD = 0
+        # print("Overall episode reward", self.env.BIG_REWARD)
+        # print("Overall episode driving reward", self.env.BIG_DRIVING_REWARD)
+        # print("Overall episode speed reward", self.env.BIG_SPEED_REWARD)
+        # self.env.BIG_REWARD = 0
+        # self.env.BIG_DRIVING_REWARD = 0
+        # self.env.BIG_SPEED_REWARD = 0
         obs, info = self.env.reset(seed=seed, options=options)
         return obs, info
 

@@ -272,11 +272,11 @@ class MetaDriveEnv(BaseEnv):
         reward = 0.0
         # print("===== REWARDED for driving reward", self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road)
         reward += self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road
-        self.BIG_DRIVING_REWARD += self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road
+        # self.BIG_DRIVING_REWARD += self.config["driving_reward"] * (long_now - long_last) * lateral_factor * positive_road
 
         # print("===== REWARDED for speed reward", self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road)
         reward += self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road
-        self.BIG_SPEED_REWARD += self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road
+        # self.BIG_SPEED_REWARD += self.config["speed_reward"] * (vehicle.speed_km_h / vehicle.max_speed_km_h) * positive_road
 
         step_info["step_reward"] = reward
 
@@ -297,7 +297,7 @@ class MetaDriveEnv(BaseEnv):
             reward = -self.config["crash_sidewalk_penalty"]
         step_info["route_completion"] = vehicle.navigation.route_completion
 
-        self.BIG_REWARD += reward
+        # self.BIG_REWARD += reward
         return reward, step_info
     
     def setup_engine(self):
