@@ -51,7 +51,21 @@ def norm(x, y):
 
 
 def clip(a, low, high):
-    return min(max(a, low), high)
+    """Clip a value or array between low and high.
+
+    Args:
+        a: Value or array to clip
+        low: Lower bound
+        high: Upper bound
+
+    Returns:
+        Clipped value or array
+    """
+    import numpy as np
+    if isinstance(a, np.ndarray):
+        return np.clip(a, low, high)
+    else:
+        return min(max(a, low), high)
 
 
 def point_distance(x, y):
