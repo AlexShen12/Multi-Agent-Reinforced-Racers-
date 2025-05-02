@@ -5,7 +5,7 @@ import gymnasium as gym
 from ray.rllib.core.rl_module.rl_module import RLModule
 import os
 
-checkpoint_base_directory ="/Users/jameswalker/Programming/Checkpoints/MappoCheckpoint"
+checkpoint_base_directory ="/Users/alex/Downloads/MappoCheckpoint"
 checkpoint_number = 6
 checkpoint_directory = checkpoint_base_directory + str(checkpoint_number)
 

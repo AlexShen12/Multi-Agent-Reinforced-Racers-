@@ -1,0 +1,188 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{Cost and Reward Functions for Multi-Agent Racing Safe MetaDrive Environment}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document catalogs the cost and reward functions used in the Multi-Agent Racing Safe MetaDrive Environment (marl\_safe\_metadrive\_env.py). The environment extends the SafeMetaDriveEnv to support Multi-Agent Reinforcement Learning (MARL) between two cars in a racing scenario, incorporating race-based rewards, continuous simulation despite collisions, and support for reverse driving.
+
+\section{Cost Functions}
+
+The cost functions in the Multi-Agent Racing Safe MetaDrive Environment measure safety violations during driving. The general cost function is defined as:
+
+\begin{align}
+J(\pi) &= \mathbb{E}\left[\sum_{t=0}^T \gamma^t\,C(s_t,a_t)\right] \\
+C(s_t,a_t) &= C_{\text{crash\_vehicle}}(s_t) + C_{\text{crash\_object}}(s_t) + C_{\text{out\_of\_road}}(s_t) + C_{\text{on\_yellow\_line}}(s_t) + C_{\text{on\_white\_line}}(s_t)
+\end{align}
+
+Each component of the cost function is defined as follows:
+
+\subsection{Crash Vehicle Cost}
+
+\begin{align}
+C_{\text{crash\_vehicle}}(s_t) = 
+\begin{cases}
+c_{\text{crash\_vehicle}} & \text{if vehicle crashes with another vehicle} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where $c_{\text{crash\_vehicle}} = 10.0$ is the cost parameter for crashing with another vehicle.
+
+\subsection{Crash Object Cost}
+
+\begin{align}
+C_{\text{crash\_object}}(s_t) = 
+\begin{cases}
+c_{\text{crash\_object}} & \text{if vehicle crashes with an object} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where $c_{\text{crash\_object}} = 5.0$ is the cost parameter for crashing with an object.
+
+\subsection{Out of Road Cost}
+
+\begin{align}
+C_{\text{out\_of\_road}}(s_t) = 
+\begin{cases}
+c_{\text{out\_of\_road}} \cdot (1.0 + 0.2 \cdot n_{\text{off\_road}}) & \text{if vehicle is out of road} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where $c_{\text{out\_of\_road}} = 20.0$ is the base cost parameter for driving out of road, and $n_{\text{off\_road}}$ is the number of consecutive steps the vehicle has been off-road. This creates an exponentially increasing penalty to strongly incentivize returning to the road.
+
+\subsection{On Yellow Line Cost (Wrong Side of Road)}
+
+\begin{align}
+C_{\text{on\_yellow\_line}}(s_t) = 
+\begin{cases}
+c_{\text{on\_yellow\_line}} \cdot (1.0 + 0.3 \cdot n_{\text{wrong\_side}}^{1.5}) & \text{if on yellow continuous line} \\
+0.5 \cdot c_{\text{on\_yellow\_line}} \cdot (1.0 + 0.3 \cdot n_{\text{wrong\_side}}^{1.5}) & \text{if on yellow broken line} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where $c_{\text{on\_yellow\_line}} = 3.0$ is the cost parameter for driving on a yellow line (wrong side of road), and $n_{\text{wrong\_side}}$ is the number of consecutive steps the vehicle has been on the wrong side. The cost increases exponentially the longer the vehicle stays on the wrong side.
+
+\subsection{On White Line Cost}
+
+\begin{align}
+C_{\text{on\_white\_line}}(s_t) = 
+\begin{cases}
+c_{\text{on\_white\_line}} & \text{if on white continuous line} \\
+0.5 \cdot c_{\text{on\_white\_line}} & \text{if on white broken line} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where $c_{\text{on\_white\_line}} = 1.0$ is the cost parameter for driving on a white line.
+
+\section{Reward Functions}
+
+The reward functions in the Multi-Agent Racing Safe MetaDrive Environment incentivize racing behavior, progress toward the destination, and competitive performance. The general reward function is defined as:
+
+\begin{align}
+R(s_t, a_t) = R_{\text{racing}}(s_t, a_t) + R_{\text{checkpoint}}(s_t) + R_{\text{termination}}(s_t)
+\end{align}
+
+Each component of the reward function is defined as follows:
+
+\subsection{Racing Rewards}
+
+The racing rewards component includes bonuses for being in the lead and winning the race:
+
+\begin{align}
+R_{\text{racing}}(s_t, a_t) = 
+\begin{cases}
+r_{\text{leading}} + \min(m_{\text{lead}} \cdot 0.01, 0.1) & \text{if agent is leading} \\
+0 & \text{otherwise}
+\end{cases}
++ 
+\begin{cases}
+r_{\text{winning}} & \text{if agent has won the race} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where:
+\begin{itemize}
+\item $r_{\text{leading}} = 0.1$ is the base reward for being in the lead
+\item $m_{\text{lead}}$ is the margin by which the agent is leading (distance ahead of second place)
+\item $r_{\text{winning}} = 10.0$ is the reward for winning the race
+\end{itemize}
+
+\subsection{Checkpoint Rewards}
+
+The checkpoint rewards component provides incentives for reaching checkpoints along the track:
+
+\begin{align}
+R_{\text{checkpoint}}(s_t) = \sum_{c \in C_t} \left( r_{\text{checkpoint}} + \mathbf{1}_{\text{first}}(c) \cdot r_{\text{first\_bonus}} \right)
+\end{align}
+
+Where:
+\begin{itemize}
+\item $C_t$ is the set of checkpoints reached at time step $t$
+\item $r_{\text{checkpoint}} = 2.0$ is the base reward for reaching a checkpoint
+\item $\mathbf{1}_{\text{first}}(c)$ is an indicator function that equals 1 if the agent is the first to reach checkpoint $c$, and 0 otherwise
+\item $r_{\text{first\_bonus}} = 1.0$ is the additional bonus for being the first to reach a checkpoint
+\end{itemize}
+
+\subsection{Termination Rewards}
+
+The termination rewards component provides sparse rewards at the end of an episode:
+
+\begin{align}
+R_{\text{termination}}(s_t) = 
+\begin{cases}
+r_{\text{success}} & \text{if agent reaches destination} \\
+-c_{\text{out\_of\_road}} & \text{if agent drives out of road} \\
+-c_{\text{crash\_vehicle}} & \text{if agent crashes with vehicle} \\
+-c_{\text{crash\_object}} & \text{if agent crashes with object} \\
+0 & \text{otherwise}
+\end{cases}
+\end{align}
+
+Where:
+\begin{itemize}
+\item $r_{\text{success}} = 10.0$ is the reward for successfully reaching the destination
+\item $c_{\text{out\_of\_road}} = 20.0$ is the penalty for driving out of road
+\item $c_{\text{crash\_vehicle}} = 10.0$ is the penalty for crashing with another vehicle
+\item $c_{\text{crash\_object}} = 5.0$ is the penalty for crashing with an object
+\end{itemize}
+
+\section{Comparison with Standard MetaDrive Reward Functions}
+
+The Multi-Agent Racing Safe MetaDrive Environment extends the standard MetaDrive reward functions with racing-specific components:
+
+\begin{enumerate}
+\item \textbf{Leading Reward}: Provides a continuous incentive for being in the lead position
+\item \textbf{Winning Reward}: Offers a large one-time reward for winning the race
+\item \textbf{Checkpoint Rewards}: Encourages progress through the track with intermediate rewards
+\item \textbf{First-to-Checkpoint Bonus}: Adds competitive pressure by rewarding the first agent to reach each checkpoint
+\end{enumerate}
+
+The cost functions are also enhanced with:
+
+\begin{enumerate}
+\item \textbf{Escalating Off-Road Penalties}: Costs increase the longer an agent remains off-road
+\item \textbf{Wrong-Side Penalties}: Costs for driving on the wrong side of the road, with higher penalties for continuous lines
+\item \textbf{Lane Line Penalties}: Separate costs for crossing white lane lines
+\end{enumerate}
+
+These modifications create a more competitive racing environment while maintaining safety constraints.
+
+\end{document}
